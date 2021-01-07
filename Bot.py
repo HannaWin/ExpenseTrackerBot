@@ -1,4 +1,4 @@
-#!bin/bash
+#!/usr/bin/python
 
 import telebot
 from telebot import types
