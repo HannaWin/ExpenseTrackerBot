@@ -16,20 +16,32 @@ bot = telebot.TeleBot(token, parse_mode=None)
 logging.basicConfig(level=logging.INFO)
 
 # include all categories
+# categories = ['Haushalt', 'Hobby', 'Bildung', 'Kleidung', 'Bücher', 'Wohnung', 'Ausgehen', 'Gebühren', 'Geschenke', 'Transport']
+# with open('categories.pickle', 'wb') as file:
+#     pickle.dump(categories, file)
 with open('categories.pickle', 'rb') as file:
     categories = pickle.load(file)
 
-zero_expenses = dict()
-for c in categories:
-    zero_expenses[c] = []
-
-try:
-    with open('expenses.pickle', 'rb') as file:
-        expenses = pickle.load(file)
-except EOFError:
-    expenses = zero_expenses
 
 current_cat = None
+
+def load_data(file):
+    '''load data from file if exists,
+    else create dict'''
+    try:
+        with open(file, 'rb') as f:
+            data_dict = pickle.load(f)
+    except (EOFError, FileNotFoundError):
+        data_dict = dict()
+        for c in categories:
+            data_dict[c] = []
+    return data_dict
+
+
+def save_data(data, file):
+    '''save data to pickle file'''
+    with open(file, 'wb') as f:
+        pickle.dump(data, f)
 
 
 @bot.message_handler(commands=['help'])
@@ -43,30 +55,39 @@ def welcome_message(message):
 
 @bot.message_handler(commands=['info'])
 def introduce_bot(message):
-    bot.reply_to(message, 'I am a bot that tracks any kind of expenses you have on a monthly basis.' \
-        ' Also, you can obtain an overview of all your expenses sorted by category.' \
-        ' The expenses can be reset.'
+    bot.reply_to(message, 'Du kannst ganz einfach neue Ausgaben hinzufügen, indem du /add sendest.' \
+        ' Den Betrag schickst du entweder direkt mit dem Befehl, oder danach.\n' \
+        'Mit /plot erhältst du eine graphische Übersicht aller Ausgaben, mit /ausgaben die genauen Beträge.\n'\
+        'Außerdem kannst du alle Ausgaben zurücksezten (z.B. am Monatsende), sende einfach /reset und bestätige.'
     )
     
 
-@bot.message_handler(commands=['new'])
-def add_new_category(message):
-    '''add a new category to track expenses'''
-    # when adding a new category via the bot, make sure to include an inline keyboard for it in use_bot
-    bot.reply_to(message, 'Which category would you like to add?')
+# @bot.message_handler(commands=['new'])
+# def add_new_category(message):
+#     '''add a new category to track expenses'''
+#     # when adding a new category via the bot, make sure to include an inline keyboard for it in use_bot
+#     bot.reply_to(message, 'Welche Kategorie möchtest du hinzufügen?')
 
-    @bot.message_handler(regexp='[a-zA-Z]{3,}')
-    def add_category(message):
-        cat = message.text.lower()
-        global categories, expenses
-        categories.append(cat)
-        expenses[cat] = list()
-        with open('categories.pickle', 'wb') as f:
-            pickle.dump(categories, f)
-        bot.reply_to(message, f'{cat} has been added.')
+#     @bot.message_handler(regexp='[a-zA-Z]{3,}')
+#     def add_category(message):
+#         cat = message.text.lower()
+#         global categories, expenses
+#         categories.append(cat)
+#         expenses[cat] = list()
+#         with open('categories.pickle', 'wb') as f:
+#             pickle.dump(categories, f)
+#         bot.reply_to(message, f'{cat} wurde hinzugefügt. Um es zu benutzen muss es auch als Inline-Keyboard implementiert werden.')
 
 
-@bot.message_handler(commands=['start', 'add'])
+@bot.message_handler(commands=['start'])
+def welcome_message(message):
+    '''send a welcome message and usage tips'''
+    bot.reply_to(message, 'Willkommen! Ich bin ExpenseTrackerBot und fasse deine Ausgaben zusammen.'\
+        ' Sende /help für eine Liste meiner Befehle oder füge eine neue Ausgabe hinzu mit /add.'\
+            ' Mit /info erhältst du zusätzliche Tips und Tricks.')
+
+
+@bot.message_handler(commands=['add'])
 def use_bot(message):
     '''
     use inline keyboard to add expenses or reset them;
@@ -74,14 +95,19 @@ def use_bot(message):
     '''
     keyboard = types.InlineKeyboardMarkup(row_width=3)
     # include all categories
-    a = types.InlineKeyboardButton(text="Household", callback_data="household")
-    b = types.InlineKeyboardButton(text="Hobby", callback_data="hobby")
-    c = types.InlineKeyboardButton(text="Education", callback_data="education")
-    d = types.InlineKeyboardButton(text="Clothes", callback_data="clothes")
-    e = types.InlineKeyboardButton(text="Books", callback_data="books")
-    f = types.InlineKeyboardButton(text="RESET ALL", callback_data="reset")
-    keyboard.add(a, b, c, d, e, f)
-    bot.reply_to(message, "What kind of expense do you want to add?", reply_markup=keyboard)
+    a = types.InlineKeyboardButton(text="Haushalt", callback_data="Haushalt")
+    b = types.InlineKeyboardButton(text="Hobby", callback_data="Hobby")
+    c = types.InlineKeyboardButton(text="Bildung", callback_data="Bildung")
+    d = types.InlineKeyboardButton(text="Kleidung", callback_data="Kleidung")
+    e = types.InlineKeyboardButton(text="Bücher", callback_data="Bücher")
+    f = types.InlineKeyboardButton(text="Wohnung", callback_data="Wohnung")
+    g = types.InlineKeyboardButton(text="Ausgehen", callback_data="Ausgehen")
+    h = types.InlineKeyboardButton(text="Gebühren", callback_data="Gebühren")
+    i = types.InlineKeyboardButton(text="Geschenke", callback_data="Geschenke")
+    j = types.InlineKeyboardButton(text="Transport", callback_data="Transport")
+    k = types.InlineKeyboardButton(text="LÖSCHEN", callback_data="LÖSCHEN")
+    keyboard.add(a, b, c, d, e, f, g, h, i, j, k)
+    bot.reply_to(message, "Welche Art von Ausgabe möchtest du hinzufügen?", reply_markup=keyboard)
 
     
     @bot.callback_query_handler(func=lambda m: True)
@@ -93,15 +119,14 @@ def use_bot(message):
         if cat in categories:
             global current_cat
             current_cat = cat
-            print('cat check')
-            bot.reply_to(call.message, 'Please specify the amount of money.')
+            bot.reply_to(call.message, 'Bitte nenne den Betrag.')
 
-        elif cat == 'reset':
-            bot.reply_to(call.message, 'Are you sure you want to reset all expenses?')
+        elif cat == 'LÖSCHEN':
+            bot.reply_to(call.message, 'Willst du wirklich alle bisherigen Ausgaben löschen?')
             reset_bot()
 
         else:
-            bot.reply_to(call.message, 'Please use the inline keyboard or a command.')
+            bot.reply_to(call.message, 'Bitte nutze das Inline-Keyboard oder einen Befehl.')
 
         print(expenses)
 
@@ -116,26 +141,31 @@ def reset_bot():
         def double_check(message):
             nonlocal no_answer
             global expenses
-            if message.text in ('yes', 'Yes'):
+            if message.text.lower() in ('yes', 'ja'):
                 # save current expenses to file
-                with open(f'expenses_state_{date.today()}.pickle', 'wb') as file:
+                with open(f'expenses_{date.today()}.pickle', 'wb') as file:
                     pickle.dump(expenses, file)
+                with open(f'date_expenses_{date.today()}.pickle', 'wb') as file:
+                    pickle.dump(date_expense, file)
                 # reset expenses
-                expenses = zero_expenses
-                with open('expenses.pickle', 'wb') as file:
-                    pickle.dump(zero_expenses, file)
-                bot.reply_to(message, 'Expenses succesfully reset.')
+                expenses, date_expense = dict(), dict()
+                for cat in categories:
+                    expenses[cat] = []
+                    date_expense[cat] = []
+                save_data(expenses, 'expenses.pickle')
+                save_data(date_expense, 'date_expenses.pickle')
+                bot.reply_to(message, 'Ausgaben wurden zurückgesetzt.')
                 no_answer = False
                 logging.info(f'Expenses reset at {datetime.now().strftime("%d/%m/%Y %H:%M:%S")}.')
-            elif message.text in ('no', 'No'):
-                bot.reply_to(call.message, 'Command aborted. Expenses remain unchanged.')
+            elif message.text.lower() in ('no', 'nein'):
+                bot.reply_to(call.message, 'Abgebrochen. Asugaben bleiben unverändert.')
                 no_answer = False
 
 
 @bot.message_handler(commands=['reset'])
 def reset_expenses(message):
     '''reset expenses (alternative to inline keyboard)'''
-    bot.reply_to(message, 'Are you sure you want to reset all expenses?')
+    bot.reply_to(message, 'Willst du wirklich alle bisherigen Ausgaben löschen?')
     reset_bot()
 
 
@@ -146,20 +176,19 @@ def get_expense(message):
     global current_cat
     if current_cat:
         exp = float(message.text)
-        print(exp)
         expenses[current_cat].append(exp)
-        bot.reply_to(message, f'{exp}€ were added to {current_cat}.')
-        print(expenses)
+        date_expense[current_cat].append((exp, datetime.today()))
+        bot.reply_to(message, f'{exp}€ wurden zu {current_cat} hinzugefügt.')
         current_cat = None
     else:
-        bot.reply_to(message, 'Please specify a category using /start or /add.')
+        bot.reply_to(message, 'Gib eine Kategorie an mit /start oder /add.')
 
 
 @bot.message_handler(commands=['del'])
 def del_expense(message):
     '''Deletes most recently added expense for 
     a requested category'''
-    bot.reply_to(message, 'Name the category of the expense you want to delete.')
+    bot.reply_to(message, 'Von welcher Kategorie willst du die letzte Ausgabe löschen?')
     @bot.message_handler(content_types=['text'], func=lambda m: m.text in categories)
     def del_category_expense(message):
         global expenses
@@ -167,9 +196,9 @@ def del_expense(message):
         try:
             del expenses[cat][-1]
             print(expenses)
-            bot.reply_to(message, f'Last expense added to {cat} was successfully deleted.')
+            bot.reply_to(message, f'Die letzte Ausgabe für {cat} wurde gelöscht.')
         except IndexError:
-            bot.reply_to(message, f'No expenses in {cat}.')
+            bot.reply_to(message, f'Keine Ausgaben für {cat}.')
 
 
 
@@ -186,35 +215,32 @@ def plot_expenses(message):
     sns.set_palette('crest')
 
     sns.barplot(cats, exps)
+    plt.ylabel('Ausgaben in €')
 
     # save plot to file and send to chat
     plt.savefig('plot.png')
     bot.send_photo(message.chat.id, photo=open('plot.png', 'rb'))
 
 
-@bot.message_handler(commands=['expenses'])
+@bot.message_handler(commands=['ausgaben'])
 def show_current_expenses(message):
     '''show the exact number of current expenses'''
-    pass
-    
+    output_text = 'Ausgaben bisher:\n\n'
+    for cat in categories:
+        cat_text = f'{cat}: {sum(expenses[cat])}€\n'
+        output_text += cat_text
+    bot.reply_to(message, output_text)
 
 
+
+expenses = load_data('expenses.pickle')
+date_expense = load_data('date_of_expenses.pickle')
 
 try:
     bot.polling()
 except RuntimeError:
     os.execv(sys.executable, ['python'] + [sys.argv[0]])    # restart script
 
-
-with open('expenses.pickle', 'wb') as file:
-    pickle.dump(expenses, file)
-
-
-##################################ideas
-# overview all expenses
-# track dates of expenses (discover behavior)
-
-##################################to do
-# add commands to bot father
-# set up code on raspPI
-# replace print statements with logging
+# save data
+save_data(expenses, 'expenses.pickle')
+save_data(date_expense, 'date_expenses.pickle')
