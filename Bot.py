@@ -9,8 +9,12 @@ from datetime import date, datetime
 import logging
 import os, sys
 
-with open('api_token.txt', 'r') as  file:
-    token = file.read().strip()
+try:
+    with open('api_token.txt', 'r') as  file:
+        token = file.read().strip()
+except FileNotFoundError:
+    raise Exception("Please create the file 'api_token.txt' that contains your bot's api token.")
+    
 bot = telebot.TeleBot(token, parse_mode=None)
 
 logging.basicConfig(level=logging.INFO)
