@@ -1,7 +1,7 @@
 start - Willkommen!
 info - Infos und Tips
 add - Ausgaben hinzufügen
+ausgaben - Übersicht aller Ausgaben
+show_fixkosten - Übersicht über Fixkosten
 del - letzte Ausgabe einer Kategorie löschen
 reset - alle Ausgaben zurücksetzen
-plot - graphische Übersicht aller Ausgaben
-ausgaben - exakte Beträge aller Ausgaben

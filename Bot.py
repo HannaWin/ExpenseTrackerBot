@@ -10,20 +10,20 @@ import logging
 import os, sys
 
 try:
-    with open('api_token.txt', 'r') as  file:
+    with open('data/api_token.txt', 'r') as  file:
         token = file.read().strip()
 except FileNotFoundError:
     raise Exception("Please create the file 'api_token.txt' that contains your bot's api token.")
     
 bot = telebot.TeleBot(token, parse_mode=None)
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, filename=f"logfiles/logging{date.today()}.log")
 
 # include all categories
 # categories = ['Haushalt', 'Hobby', 'Bildung', 'Kleidung', 'Bücher', 'Wohnung', 'Ausgehen', 'Gebühren', 'Geschenke', 'Transport']
-# with open('categories.pickle', 'wb') as file:
+# with open('data/categories.pickle', 'wb') as file:
 #     pickle.dump(categories, file)
-with open('categories.pickle', 'rb') as file:
+with open('data/categories.pickle', 'rb') as file:
     categories = pickle.load(file)
 
 
@@ -48,6 +48,12 @@ def save_data(data, file):
         pickle.dump(data, f)
 
 
+def update_serialized_data():
+    '''save updated data to pickle files'''
+    save_data(expenses, 'serialized_data/expenses.pickle')
+    save_data(date_expense, 'serialized_data/date_expenses.pickle')
+    
+
 @bot.message_handler(commands=['help'])
 def welcome_message(message):
     bot.reply_to(message, '''Welcome to CurBot. I respond to these commands:
@@ -64,23 +70,6 @@ def introduce_bot(message):
         'Mit /plot erhältst du eine graphische Übersicht aller Ausgaben, mit /ausgaben die genauen Beträge.\n'\
         'Außerdem kannst du alle Ausgaben zurücksezten (z.B. am Monatsende), sende einfach /reset und bestätige.'
     )
-    
-
-# @bot.message_handler(commands=['new'])
-# def add_new_category(message):
-#     '''add a new category to track expenses'''
-#     # when adding a new category via the bot, make sure to include an inline keyboard for it in use_bot
-#     bot.reply_to(message, 'Welche Kategorie möchtest du hinzufügen?')
-
-#     @bot.message_handler(regexp='[a-zA-Z]{3,}')
-#     def add_category(message):
-#         cat = message.text.lower()
-#         global categories, expenses
-#         categories.append(cat)
-#         expenses[cat] = list()
-#         with open('categories.pickle', 'wb') as f:
-#             pickle.dump(categories, f)
-#         bot.reply_to(message, f'{cat} wurde hinzugefügt. Um es zu benutzen muss es auch als Inline-Keyboard implementiert werden.')
 
 
 @bot.message_handler(commands=['start'])
@@ -132,7 +121,6 @@ def use_bot(message):
         else:
             bot.reply_to(call.message, 'Bitte nutze das Inline-Keyboard oder einen Befehl.')
 
-        print(expenses)
 
 
 def reset_bot():
@@ -144,25 +132,25 @@ def reset_bot():
         @bot.message_handler(content_types=['text'])
         def double_check(message):
             nonlocal no_answer
-            global expenses
+            global date_expense, expenses
             if message.text.lower() in ('yes', 'ja'):
                 # save current expenses to file
-                with open(f'expenses_{date.today()}.pickle', 'wb') as file:
+                with open(f'previous_expenses/expenses_{date.today()}.pickle', 'wb') as file:
                     pickle.dump(expenses, file)
-                with open(f'date_expenses_{date.today()}.pickle', 'wb') as file:
+                with open(f'previous_expenses/date_expenses_{date.today()}.pickle', 'wb') as file:
                     pickle.dump(date_expense, file)
                 # reset expenses
                 expenses, date_expense = dict(), dict()
                 for cat in categories:
                     expenses[cat] = []
                     date_expense[cat] = []
-                save_data(expenses, 'expenses.pickle')
-                save_data(date_expense, 'date_expenses.pickle')
+                update_serialized_data()
                 bot.reply_to(message, 'Ausgaben wurden zurückgesetzt.')
                 no_answer = False
-                logging.info(f'Expenses reset at {datetime.now().strftime("%d/%m/%Y %H:%M:%S")}.')
+                logging.info(f'Expenses reset on {datetime.now().strftime("%d/%m/%Y %H:%M:%S")}.')
+                logging.basicConfig(filename=f"logfiles/logging{date.today()}.log")
             elif message.text.lower() in ('no', 'nein'):
-                bot.reply_to(call.message, 'Abgebrochen. Asugaben bleiben unverändert.')
+                bot.reply_to(call.message, 'Abgebrochen. Ausgaben bleiben unverändert.')
                 no_answer = False
 
 
@@ -182,7 +170,10 @@ def get_expense(message):
         exp = float(message.text)
         expenses[current_cat].append(exp)
         date_expense[current_cat].append((exp, datetime.today()))
+        # save updated data to pickle files
+        update_serialized_data()
         bot.reply_to(message, f'{exp}€ wurden zu {current_cat} hinzugefügt.')
+        logging.info(f'New expense was added on {datetime.now().strftime("%d/%m/%Y %H:%M:%S")}.')
         current_cat = None
     else:
         bot.reply_to(message, 'Gib eine Kategorie an mit /start oder /add.')
@@ -193,58 +184,96 @@ def del_expense(message):
     '''Deletes most recently added expense for 
     a requested category'''
     bot.reply_to(message, 'Von welcher Kategorie willst du die letzte Ausgabe löschen?')
+
     @bot.message_handler(content_types=['text'], func=lambda m: m.text in categories)
     def del_category_expense(message):
         global expenses
         cat = message.text.lower()
         try:
             del expenses[cat][-1]
-            print(expenses)
+            del date_expense[cat][-1]
+            update_serialized_data()
             bot.reply_to(message, f'Die letzte Ausgabe für {cat} wurde gelöscht.')
+            logging.info(f'Expense deleted added on {datetime.now().strftime("%d/%m/%Y %H:%M:%S")}.')
         except IndexError:
             bot.reply_to(message, f'Keine Ausgaben für {cat}.')
 
 
 
-@bot.message_handler(commands=['plot'])
+@bot.message_handler(commands=['ausgaben'])
 def plot_expenses(message):
     exps, cats = list(), list()
+    overview_text = '' 
+    total_sum = 0
+
     for cat in categories:
+        overview_text += f'{cat}: {sum(expenses[cat])}€\n'
+        total_sum += sum(expenses[cat])
         if expenses[cat]:
             exps.append(sum(expenses[cat]))
             cats.append(cat)
+
+    if total_sum != 0:
+        bot.reply_to(message, f'Gesamte Ausgaben bisher: {total_sum}€')
+        bot.reply_to(message, overview_text)
+
+        # set style for bar chart
+        sns.set_style('darkgrid')
+        sns.set_palette('crest')
+
+        sns.barplot(cats, exps)
+        plt.ylabel('Ausgaben in €')
+
+        # save plot to file and send to chat
+        plt.savefig('ausgaben.png')
+        bot.send_photo(message.chat.id, photo=open('ausgaben.png', 'rb'))
+
+    else:
+        bot.reply_to(message, 'Keine Ausgaben bisher.' )
+    
+
+
+@bot.message_handler(commands=['show_fixkosten'])
+def monthly_expenses(message):
+    '''calculate and update fix monthly expenses'''
+    try:
+        with open('serialized_data/regular_expenses.pickle', 'rb') as f:
+            fix_expenses = pickle.load(f)
+    except FileNotFoundError:
+        # insert values for each category
+        fix_expenses = {'Miete': 0, 'Versicherung': 0, 'Strom': 0, 'Gebühren': 0, 'Internet': 0, 'Fitness': 0 ,'Medien': 0}
+        save_data(fix_expenses, 'serialized_data/regular_expenses.pickle')
+
+    overview = f'Deine monatlichen Fixkosten liegen bei {sum(fix_expenses.values())}:\n'
+
+    # plot data
+    exps, cats = list(), list()
+    for cat, val in fix_expenses.items():
+        exps.append(val)
+        cats.append(cat)
+        overview += f'{cat}: {val}\n'
+
+    bot.reply_to(message, overview)
 
     # set style for bar chart
     sns.set_style('darkgrid')
     sns.set_palette('crest')
 
     sns.barplot(cats, exps)
-    plt.ylabel('Ausgaben in €')
+    plt.ylabel('Kosten in €')
 
     # save plot to file and send to chat
-    plt.savefig('plot.png')
-    bot.send_photo(message.chat.id, photo=open('plot.png', 'rb'))
-
-
-@bot.message_handler(commands=['ausgaben'])
-def show_current_expenses(message):
-    '''show the exact number of current expenses'''
-    output_text = 'Ausgaben bisher:\n\n'
-    for cat in categories:
-        cat_text = f'{cat}: {sum(expenses[cat])}€\n'
-        output_text += cat_text
-    bot.reply_to(message, output_text)
+    plt.savefig('fixkosten.png')
+    bot.send_photo(message.chat.id, photo=open('fixkosten.png', 'rb'))
 
 
 
-expenses = load_data('expenses.pickle')
-date_expense = load_data('date_of_expenses.pickle')
+expenses = load_data('serialized_data/expenses.pickle')
+date_expense = load_data('serialized_data/date_of_expenses.pickle')
+
 
 try:
     bot.polling()
 except RuntimeError:
     os.execv(sys.executable, ['python'] + [sys.argv[0]])    # restart script
 
-# save data
-save_data(expenses, 'expenses.pickle')
-save_data(date_expense, 'date_expenses.pickle')
