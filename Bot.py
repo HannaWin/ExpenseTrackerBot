@@ -1,5 +1,22 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
+'''
+todo
+    - update list of commands in /help
+    - add category: Sparen
 
+
+info
+- the added expenses get saved twice: with and without date (expenses and date_expenses)
+    -> let's you analyse spending patterns (i.e. times of the months, week days, etc.)
+
+- when the bot is reset, all previous expenses get saved to a file including the date
+    -> kind of back-up for accidental resets
+    -> makes long-term analyses possible
+
+- plots do not get saved but are overwritten by the newest plot
+    -> if you want to save plots, download the image from the telegram chat
+
+'''
 import telebot
 from telebot import types
 import pickle, re
@@ -8,6 +25,7 @@ import matplotlib.pyplot as plt
 from datetime import date, datetime
 import logging
 import os, sys
+from InitializeData import initialize
 
 try:
     with open('data/api_token.txt', 'r') as  file:
@@ -19,27 +37,13 @@ bot = telebot.TeleBot(token, parse_mode=None)
 
 logging.basicConfig(level=logging.INFO, filename=f"logfiles/logging{date.today()}.log")
 
-# include all categories
-# categories = ['Haushalt', 'Hobby', 'Bildung', 'Kleidung', 'Bücher', 'Wohnung', 'Ausgehen', 'Gebühren', 'Geschenke', 'Transport']
-# with open('data/categories.pickle', 'wb') as file:
-#     pickle.dump(categories, file)
-with open('data/categories.pickle', 'rb') as file:
-    categories = pickle.load(file)
-
-
 current_cat = None
 
+
 def load_data(file):
-    '''load data from file if exists,
-    else create dict'''
-    try:
-        with open(file, 'rb') as f:
-            data_dict = pickle.load(f)
-    except (EOFError, FileNotFoundError):
-        data_dict = dict()
-        for c in categories:
-            data_dict[c] = []
-    return data_dict
+    '''load data from file if exists'''
+    with open(file, 'rb') as f:
+        return pickle.load(f)
 
 
 def save_data(data, file):
@@ -48,18 +52,28 @@ def save_data(data, file):
         pickle.dump(data, f)
 
 
+def load_keyboard():
+    '''load buttons of inline keyboard'''
+    with open('data/inline_keyboard.pickle', 'rb') as file:
+        return pickle.load(file)
+
+
 def update_serialized_data():
     '''save updated data to pickle files'''
     save_data(expenses, 'serialized_data/expenses.pickle')
-    save_data(date_expense, 'serialized_data/date_expenses.pickle')
-    
+    save_data(date_expense, 'serialized_data/date_of_expenses.pickle')
 
+    
 @bot.message_handler(commands=['help'])
 def welcome_message(message):
     bot.reply_to(message, '''Welcome to CurBot. I respond to these commands:
     /start - start using the bot
     /help - obtain a list of commands
     /info - learn more about CurBot
+    /ausgaben - list and plot all expenses
+    /show_fixkosten - show all regular expenses
+    /del - delete last expense
+    /reset - reset all expenses
     ''')
 
 
@@ -78,6 +92,7 @@ def welcome_message(message):
     bot.reply_to(message, 'Willkommen! Ich bin ExpenseTrackerBot und fasse deine Ausgaben zusammen.'\
         ' Sende /help für eine Liste meiner Befehle oder füge eine neue Ausgabe hinzu mit /add.'\
             ' Mit /info erhältst du zusätzliche Tips und Tricks.')
+    
 
 
 @bot.message_handler(commands=['add'])
@@ -88,21 +103,11 @@ def use_bot(message):
     '''
     keyboard = types.InlineKeyboardMarkup(row_width=3)
     # include all categories
-    a = types.InlineKeyboardButton(text="Haushalt", callback_data="Haushalt")
-    b = types.InlineKeyboardButton(text="Hobby", callback_data="Hobby")
-    c = types.InlineKeyboardButton(text="Bildung", callback_data="Bildung")
-    d = types.InlineKeyboardButton(text="Kleidung", callback_data="Kleidung")
-    e = types.InlineKeyboardButton(text="Bücher", callback_data="Bücher")
-    f = types.InlineKeyboardButton(text="Wohnung", callback_data="Wohnung")
-    g = types.InlineKeyboardButton(text="Ausgehen", callback_data="Ausgehen")
-    h = types.InlineKeyboardButton(text="Gebühren", callback_data="Gebühren")
-    i = types.InlineKeyboardButton(text="Geschenke", callback_data="Geschenke")
-    j = types.InlineKeyboardButton(text="Transport", callback_data="Transport")
-    k = types.InlineKeyboardButton(text="LÖSCHEN", callback_data="LÖSCHEN")
-    keyboard.add(a, b, c, d, e, f, g, h, i, j, k)
+    inline_keyboards = load_keyboard()
+    for kb in inline_keyboards:
+        keyboard.add(kb)
     bot.reply_to(message, "Welche Art von Ausgabe möchtest du hinzufügen?", reply_markup=keyboard)
 
-    
     @bot.callback_query_handler(func=lambda m: True)
     def parse_callback(call):
         ''''''
@@ -113,10 +118,6 @@ def use_bot(message):
             global current_cat
             current_cat = cat
             bot.reply_to(call.message, 'Bitte nenne den Betrag.')
-
-        elif cat == 'LÖSCHEN':
-            bot.reply_to(call.message, 'Willst du wirklich alle bisherigen Ausgaben löschen?')
-            reset_bot()
 
         else:
             bot.reply_to(call.message, 'Bitte nutze das Inline-Keyboard oder einen Befehl.')
@@ -166,13 +167,20 @@ def get_expense(message):
     '''any number types into the chat will be considered as expense
     as long as there is a current_cat(egory)'''
     global current_cat
+    # numbers are only considered when there is an active category (avoids spam)
     if current_cat:
-        exp = float(message.text)
+        try:
+            exp = float(message.text)
+        except ValueError:
+            # substitute , with .
+            exp = float(message.text.replace(',', '.'))
+
         expenses[current_cat].append(exp)
         date_expense[current_cat].append((exp, datetime.today()))
         # save updated data to pickle files
         update_serialized_data()
         bot.reply_to(message, f'{exp}€ wurden zu {current_cat} hinzugefügt.')
+        print(expenses)
         logging.info(f'New expense was added on {datetime.now().strftime("%d/%m/%Y %H:%M:%S")}.')
         current_cat = None
     else:
@@ -188,7 +196,7 @@ def del_expense(message):
     @bot.message_handler(content_types=['text'], func=lambda m: m.text in categories)
     def del_category_expense(message):
         global expenses
-        cat = message.text.lower()
+        cat = message.text
         try:
             del expenses[cat][-1]
             del date_expense[cat][-1]
@@ -241,7 +249,7 @@ def monthly_expenses(message):
             fix_expenses = pickle.load(f)
     except FileNotFoundError:
         # insert values for each category
-        fix_expenses = {'Miete': 0, 'Versicherung': 0, 'Strom': 0, 'Gebühren': 0, 'Internet': 0, 'Fitness': 0 ,'Medien': 0}
+        fix_expenses = {'Miete': 0, 'Strom': 0, 'Gebühren': 0, 'Internet': 0, 'Fitness': 0 ,'TV': 0}
         save_data(fix_expenses, 'serialized_data/regular_expenses.pickle')
 
     overview = f'Deine monatlichen Fixkosten liegen bei {sum(fix_expenses.values())}:\n'
@@ -267,7 +275,8 @@ def monthly_expenses(message):
     bot.send_photo(message.chat.id, photo=open('fixkosten.png', 'rb'))
 
 
-
+# load data
+categories = load_data('data/categories.pickle')
 expenses = load_data('serialized_data/expenses.pickle')
 date_expense = load_data('serialized_data/date_of_expenses.pickle')
 
